@@ -7,7 +7,7 @@ from compas.geometry import cross_vectors
 from scipy.sparse import csr_matrix
 
 
-def equilibrium_setup(assembly, penalty=False):
+def equilibrium_setup(assembly, penalty=False, verbose=False):
     """Set up equilibrium matrix.
 
     Parameters
@@ -26,12 +26,13 @@ def equilibrium_setup(assembly, penalty=False):
     free = free_nodes(assembly)
     aeq = make_aeq(assembly, penalty=penalty)
     aeq = aeq[[index * 6 + i for index in free for i in range(6)], :]
-    print("Aeq: ", aeq.shape)
+    if verbose:
+        print("Aeq: ", aeq.shape)
 
     return aeq
 
 
-def friction_setup(assembly, mu, penalty=False, friction_net=False):
+def friction_setup(assembly, mu, penalty=False, friction_net=False, verbose=False):
     """Set up friction matrix.
 
     Parameters
@@ -53,12 +54,13 @@ def friction_setup(assembly, mu, penalty=False, friction_net=False):
     """
     v_count = num_vertices(assembly)
     afr = make_afr(v_count, fcon_number=8, mu=mu, penalty=penalty, friction_net=friction_net)
-    print("Afr: ", afr.shape)
+    if verbose:
+        print("Afr: ", afr.shape)
 
     return afr
 
 
-def external_force_setup(assembly, density):
+def external_force_setup(assembly, density, verbose=False):
     """Set up external force vector.
 
     Parameters
@@ -85,7 +87,8 @@ def external_force_setup(assembly, density):
         block = assembly.node_block(node)
         index = key_index[node]
         p[index][2] = -block.volume() * (block.attributes["density"] if "density" in block.attributes else density)
-        print((block.attributes["density"] if "density" in block.attributes else density))
+        if verbose:
+            print((block.attributes["density"] if "density" in block.attributes else density))
 
     p = np.array(p, dtype=float)
     p = p[free, :].reshape((-1, 1), order="C")

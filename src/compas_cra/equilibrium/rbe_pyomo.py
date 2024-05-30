@@ -23,6 +23,8 @@ def rbe_solve(
     density: float = 1.0,
     verbose: bool = False,
     timer: bool = False,
+    penalty: bool =  True,
+    solver_options: dict = None
 ) -> Assembly:
     r"""RBE solver with penalty formulation using Pyomo + IPOPT.
 
@@ -70,14 +72,17 @@ def rbe_solve(
     if timer:
         start_time = time.time()
 
+    if solver_options is None:
+        solver_options = {}
+
     v_num = num_vertices(assembly)  # number of vertices
 
     model.f_id = pyo.Set(initialize=range(v_num * 4))  # force indices
     model.f = pyo.Var(model.f_id, initialize=0, domain=bounds("f_tilde"))
     model.array_f = np.array([model.f[i] for i in model.f_id])
 
-    aeq_b = equilibrium_setup(assembly, penalty=True)
-    afr_b = friction_setup(assembly, mu, penalty=True)
+    aeq_b = equilibrium_setup(assembly, penalty=penalty, verbose=verbose)
+    afr_b = friction_setup(assembly, mu, penalty=penalty, verbose=verbose)
     p = external_force_setup(assembly, density)
 
     obj_rbe = objectives("rbe", (0, 1e0, 1e6, 1e0))
@@ -89,11 +94,13 @@ def rbe_solve(
 
     if timer:
         print("--- set up time: %s seconds ---" % (time.time() - start_time))
-    print("finished setup... now trying to solve it...")
+    if verbose:
+        print("finished setup... now trying to solve it...")
     if timer:
         start_time = time.time()
 
     solver = pyo.SolverFactory("ipopt")
+    solver.options.update(solver_options)
     result = solver.solve(model, tee=verbose)
 
     if timer:
@@ -104,7 +111,7 @@ def rbe_solve(
         print("objective value: ")
         model.obj.display()
 
-    pyomo_result_check(result)
-    pyomo_result_assembly(model, assembly, penalty=True, verbose=verbose)
+    pyomo_result_check(result, verbose=verbose)
+    pyomo_result_assembly(model, assembly, penalty=penalty, verbose=verbose)
 
     return assembly

@@ -259,7 +259,7 @@ def static_equilibrium_constraints(model, aeq, afr, p) -> Callable:
     return equilibrium_constraints, friction_constraint
 
 
-def pyomo_result_check(result):
+def pyomo_result_check(result, verbose=False):
     """Check if pyomo optimisation result, raise error if the problem is infeasible."""
     if (
         result.solver.termination_condition is not pyo.TerminationCondition.optimal
@@ -267,7 +267,8 @@ def pyomo_result_check(result):
     ):
         raise ValueError(result.solver.termination_condition)
 
-    print("result: ", result.solver.termination_condition)
+    if verbose:
+        print("result: ", result.solver.termination_condition)
 
 
 def pyomo_result_assembly(model, assembly, penalty=False, verbose=False):

@@ -28,6 +28,7 @@ def cra_penalty_solve(
     eps: float = 1e-4,
     verbose: bool = False,
     timer: bool = False,
+    solver_options: dict = None
 ) -> Assembly:
     r"""CRA solver with penalty formulation using Pyomo + IPOPT.
 
@@ -85,6 +86,9 @@ def cra_penalty_solve(
     if timer:
         start_time = time.time()
 
+    if solver_options is None:
+        solver_options = {}
+
     model = pyo.ConcreteModel()
 
     v_num = num_vertices(assembly)  # number of vertices
@@ -104,10 +108,10 @@ def cra_penalty_solve(
     model.array_f = np.array([model.f[i] for i in model.f_id])
     model.array_q = np.array([model.q[i] for i in model.q_id])
 
-    aeq = equilibrium_setup(assembly, penalty=False)
-    aeq_b = equilibrium_setup(assembly, penalty=True)
-    afr_b = friction_setup(assembly, mu, penalty=True)
-    p = external_force_setup(assembly, density)
+    aeq = equilibrium_setup(assembly, penalty=False, verbose=verbose)
+    aeq_b = equilibrium_setup(assembly, penalty=True, verbose=verbose)
+    afr_b = friction_setup(assembly, mu, penalty=True, verbose=verbose)
+    p = external_force_setup(assembly, density, verbose=verbose)
 
     model.d = aeq.toarray().T @ model.array_q
     model.forces = f_basis * model.array_f[:, np.newaxis]  # force x in global coordinate
@@ -133,7 +137,8 @@ def cra_penalty_solve(
 
     if timer:
         print("--- set up time: %s seconds ---" % (time.time() - start_time))
-    print("finished setup... now trying to solve it...")
+    if verbose:
+        print("finished setup... now trying to solve it...")
     if timer:
         start_time = time.time()
 
@@ -142,6 +147,7 @@ def cra_penalty_solve(
     solver.options["constr_viol_tol"] = 1e-7  # constraint tolerance
     solver.options["acceptable_tol"] = 1e-6
     solver.options["acceptable_constr_viol_tol"] = 1e-5
+    solver.options.update(solver_options)
     # https://coin-or.github.io/Ipopt/OPTIONS.html
     result = solver.solve(model, tee=verbose)
 
@@ -155,7 +161,7 @@ def cra_penalty_solve(
         print("objective value: ")
         model.obj.display()
 
-    pyomo_result_check(result)
+    pyomo_result_check(result, verbose=verbose)
     pyomo_result_assembly(model, assembly, penalty=True, verbose=verbose)
 
     return assembly

@@ -28,6 +28,7 @@ def cra_solve(
     eps: float = 1e-4,
     verbose: bool = False,
     timer: bool = False,
+    solver_options: dict = None
 ) -> Assembly:
     r"""CRA solver using Pyomo + IPOPT.
 
@@ -81,6 +82,9 @@ def cra_solve(
     if timer:
         start_time = time.time()
 
+    if solver_options is None:
+        solver_options = {}
+
     model = pyo.ConcreteModel()
 
     v_num = num_vertices(assembly)  # number of vertices
@@ -99,9 +103,9 @@ def cra_solve(
     model.array_f = np.array([model.f[i] for i in model.f_id])
     model.array_q = np.array([model.q[i] for i in model.q_id])
 
-    aeq = equilibrium_setup(assembly)
-    afr = friction_setup(assembly, mu)
-    p = external_force_setup(assembly, density)
+    aeq = equilibrium_setup(assembly, verbose=verbose)
+    afr = friction_setup(assembly, mu, verbose=verbose)
+    p = external_force_setup(assembly, density, verbose=verbose)
 
     model.d = aeq.toarray().T @ model.array_q
     model.forces = basis * model.array_f[:, np.newaxis]  # force x in global coordinate
@@ -125,7 +129,8 @@ def cra_solve(
 
     if timer:
         print("--- set up time: %s seconds ---" % (time.time() - start_time))
-    print("finished setup... now trying to solve it...")
+    if verbose:
+        print("finished setup... now trying to solve it...")
     if timer:
         start_time = time.time()
 
@@ -136,6 +141,7 @@ def cra_solve(
     solver.options["acceptable_tol"] = 1e-8
     solver.options["acceptable_constr_viol_tol"] = 1e-8
     solver.options["acceptable_compl_inf_tol"] = 1e-8
+    solver.options.update(solver_options)
     # https://coin-or.github.io/Ipopt/OPTIONS.html
     result = solver.solve(model, tee=verbose)
 
