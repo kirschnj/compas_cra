@@ -17,7 +17,7 @@ class CRA_Assembly(Assembly):
 
         self.attributes.update({"name": "CRA_Assembly"})
         self.graph.default_node_attributes.update({"block": None, "displacement": [0, 0, 0, 0, 0, 0]})
-        self.graph.default_edge_attributes.update({"interface": None, "interfaces": []})
+        self.graph.default_edge_attributes.update({"interface": None, "interfaces": None})
 
     def add_blocks_from_rhinomeshes(self, guids):
         """Add multiple blocks from their representation as as Rhino meshes.
@@ -84,11 +84,12 @@ class CRA_Assembly(Assembly):
 
         """
         if not self.graph.has_edge((u, v)):
-            self.graph.add_edge(u, v, interfaces=[interface])
-        else:
-            interfaces = self.graph.edge_attribute((u, v), "interfaces")
-            interfaces.append(interface)
-            self.graph.edge_attribute((u, v), "interfaces", interfaces)
+            self.graph.add_edge(u, v)
+        interfaces = self.graph.edge_attribute((u, v), "interfaces")
+        if interfaces is None:
+            interfaces = []
+        interfaces.append(interface)
+        self.graph.edge_attribute((u, v), "interfaces", interfaces)
 
     def add_interfaces_from_meshes(self, meshes, u, v):
         """Add interfaces from meshes to edge (u, v) interfaces.
@@ -147,6 +148,21 @@ class CRA_Assembly(Assembly):
 
         """
         self.graph.node_attribute(key, "is_support", True)
+
+    def remove_boundary_condition(self, node):
+        """Remove block boundary condition.
+        
+        Parameters
+        ----------
+        node : int
+            Assembly node key.
+            
+        Returns
+        -------
+        None
+        
+        """
+        self.graph.node_attribute(node, "is_support", False)
 
     def delete_blocks(self, keys):
         """Delete blocks.
@@ -280,3 +296,7 @@ class CRA_Assembly(Assembly):
         n = self.graph.number_of_nodes()
         w = self.get_weight_total(density)
         return w / n
+
+    def number_of_interfaces(self):
+        return len([*self.interfaces()])
+    
