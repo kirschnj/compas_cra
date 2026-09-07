@@ -10,8 +10,10 @@ from a separate force diagram.
 The load plot uses the left-anchor reaction convention. A repository load
 ``(Fx, Fz)`` on the held rightmost block is displayed as ``(Fx, -Fz)`` at the
 left anchor. This anchor vector is the force-diagram pole. A vertical chain of
-equal weight steps, each ``0.863938``, supplies the directions of the form
-diagram. Commonly scaling all forces does not change those slopes.
+mesh-volume weight steps supplies the directions of the form diagram. With
+unit density, every block in this circular discretization weighs approximately
+``0.860389558``. The former value ``0.863938`` came from the supplied screenshot
+and is not used in the equilibrium reconstruction.
 
 Pressure points and CoG concurrency
 ===================================
@@ -46,13 +48,13 @@ checked as finite joints.
 Joint-admissible family
 =======================
 
-The example traces the maximal joint-admissible component connected to a
-verified feasible center. For each of ``360`` polar directions, it intersects
-the ray with the convex RBE polygon and advances outward until the joint
-insertion interval or friction condition first becomes infeasible. Bisection
-locates the final admissible load. All ``360`` points form the colored contour,
-while every fourth sample contributes a form construction so that the arch
-remains legible.
+The example samples the RBE boundary from a verified feasible center in
+``360`` polar directions. For every boundary load it solves the finite-joint
+insertion interval and verifies compression and friction. With the exact mesh
+weights, every sampled RBE-boundary load is also pressure-path admissible: the
+colored pressure-path boundary therefore coincides with the gray RBE boundary.
+There is no numerical or graphical inset. Every fourth sample contributes a
+form construction so that the arch remains legible.
 
 The representative construction shows three related objects: thin segments
 with the force-diagram slopes, neutral-blue CoG concurrency points, and diamond
@@ -69,27 +71,33 @@ pressure-point thrust path.
 Supplied numerical cases
 ========================
 
-The companion figure reconstructs the supplied numerical values directly; it
-does not trace screenshot pixels. All four supplied loads are inside the RBE
-region and all their resultant directions satisfy the friction cone. The exact
-rounded values produce these finite-joint results:
+The companion figure retains the supplied load and insertion values as
+historical screenshot observations, but reconstructs them using the mesh
+weights used by the RBE model. It does not trace screenshot pixels. Because the
+screenshot used ``0.863938`` rather than ``0.860389558``, its CoG locations and
+segment slopes are not regression targets for the corrected construction. All
+four supplied loads are inside the RBE region and satisfy friction. Their exact
+rounded insertion values produce these finite-joint results:
 
-* ``R1 (-5.0, -8.6), -46%`` passes interface ``0`` by ``0.03356``;
-* ``R2 (-3.5, -9.05), +35%`` passes interface ``10`` by ``0.01908``;
-* ``R3 (-2.9, -8.6), +47%`` is joint-admissible without adjustment;
-* ``R4 (-3.5, -8.15), -26%`` passes interfaces ``8`` and ``15`` by
-  ``0.00789`` and ``0.00118`` respectively.
+* ``R1 (-5.0, -8.6), -46%`` overruns interfaces ``0`` and ``18`` by
+  ``0.03335`` and ``0.02785`` in normalized joint coordinates;
+* ``R2 (-3.5, -9.05), +35%`` overruns interfaces ``10`` and ``11`` by
+  ``0.06438`` and ``0.03380``;
+* ``R3 (-2.9, -8.6), +47%`` overruns interface ``9`` by ``0.00393``;
+* ``R4 (-3.5, -8.15), -26%`` overruns interfaces ``7`` and ``8`` by
+  ``0.00719`` and ``0.03424``.
 
 These small discrepancies are shown as rounding-level reconstruction misses,
 not as CoG containment failures. The exact constructions remain faintly
 visible, and red rings identify only joint pressure points outside a finite
 interface. Neutral-blue CoG circles are never ringed.
 
-The green reconstructions are the nearest joint-admissible fits. They are
-approximately ``R1 (-4.998449, -8.602601), -42.681%``;
-``R2 (-3.5, -9.05), +35.744%``; unchanged ``R3``; and
-``R4 (-3.503148, -8.155253), -25.546%``. Supplied and fitted values are
-reported separately so that no measured value is silently replaced.
+The green reconstructions hold each supplied load fixed and project only its
+insertion onto the mesh-weight admissible interval. They are approximately
+``R1 (-5.0, -8.6), -42.732%``; ``R2 (-3.5, -9.05), +37.505%``;
+``R3 (-2.9, -8.6), +47.132%``; and
+``R4 (-3.5, -8.15), -24.521%``. Supplied and corrected insertions are reported
+separately so that no measured value is silently replaced.
 
 .. figure:: 19_4_1_rbe_thrust_line_supplied_cases.svg
     :width: 100%

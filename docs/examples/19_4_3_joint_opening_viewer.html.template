@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>19-4-3 | Thrust-line families and joint opening</title>
+<style>
+  :root { color-scheme: light dark; --bg: #fafaf8; --fg: #202a30; --muted: #e8eae8;
+    --line: #77838a; --inner: #0072b2; --outer: #d55e00; --motion: #009e73; --region: #dce8ec;
+    --family-lightness: 40%; --construction: #367db3; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #182027; --fg: #f1f3f4; --muted: #344149; --line: #a7b3ba;
+      --inner: #56b4e9; --outer: #ff975b; --motion: #64d5af; --region: #364b56;
+      --family-lightness: 68%; --construction: #72b6e8; }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; padding: 24px; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 1400px; margin: auto; }
+  h1 { font-size: 27px; margin: 0 0 6px; font-weight: 600; }
+  h2 { font-size: 18px; margin: 0 0 8px; font-weight: 600; }
+  p { margin: 6px 0 14px; }
+  button, select, input { max-width: 100%; font: inherit; accent-color: var(--motion); }
+  button, select { padding: 8px 12px; color: var(--fg); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 5px; }
+  button, summary { cursor: pointer; }
+  button[aria-selected="true"], button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+  :focus-visible { outline: 3px solid var(--inner); outline-offset: 3px; }
+  .tabs { display: flex; gap: 8px; margin: 20px 0; flex-wrap: wrap; }
+  .toolbar { display: grid; grid-template-columns: minmax(180px,1fr) minmax(240px,1.6fr) minmax(170px,1fr);
+    gap: 16px; align-items: end; }
+  label { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  select { width: 100%; min-width: 0; }
+  .mode-controls { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; margin: 16px 0; }
+  .button-group { display: flex; gap: 6px; flex-wrap: wrap; }
+  .check { flex-direction: row; align-items: center; }
+  .check input { width: 18px; height: 18px; }
+  #failure-controls > label { flex: 1; min-width: 210px; }
+  .readout { border-block: 1px solid var(--muted); padding: 10px 0; margin: 8px 0 12px;
+    font-variant-numeric: tabular-nums; }
+  .readout p { margin: 0; overflow-wrap: anywhere; }
+  #status { font-size: 13px; margin-top: 3px; }
+  .plots { display: grid; grid-template-columns: minmax(280px,1fr) minmax(0,2.3fr);
+    gap: 20px; align-items: center; }
+  .plot { min-width: 0; }
+  svg { display: block; width: 100%; }
+  svg text { fill: var(--fg); font: 12px system-ui, sans-serif; }
+  #load-plot { height: 360px; }
+  #arch-plot { height: 450px; }
+  #load-plot > *, #arch-plot > * { pointer-events: none; }
+  #coverage { height: 120px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 12px 0; font-size: 13px; }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .swatch { width: 20px; height: 3px; background: var(--fg); display: inline-block; }
+  .inner { background: var(--inner); } .outer { background: var(--outer); }
+  .motion { background: var(--motion); } .construction { background: var(--construction); }
+  .dashed { background: transparent; border-top: 2px dashed var(--line); height: 0; }
+  .pivot { width: 12px; height: 12px; border: 2px solid var(--fg); border-radius: 50%; background: transparent; }
+  .spectrum { background: linear-gradient(90deg,#c33,#a80,#298c4a,#168ea1,#5964cb,#b148b1,#c33); }
+  .note { max-width: 1100px; font-size: 13px; }
+  details { margin-top: 20px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--line); }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden;
+    clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+  @media (max-width: 850px) {
+    body { padding: 14px; } h1 { font-size: 22px; }
+    .toolbar, .plots { grid-template-columns: 1fr; }
+    .toolbar { gap: 10px; } #arch-plot { height: 330px; }
+    #load-plot { height: 290px; } .plots { gap: 12px; }
+  }
+  @media (pointer: coarse) { button, select { min-height: 44px; } input[type="range"] { min-height: 34px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>19-4-3 · From thrust lines to joint opening</h1>
+  <p>Explore the load boundary, follow a thrust line, and inspect the opening mechanism at that same load.</p>
+  <div class="tabs" role="tablist" aria-label="Analysis mode">
+    <button id="family-tab" type="button" role="tab" aria-controls="viewer-panel"
+      aria-selected="true">Thrust-line family</button>
+    <button id="failure-tab" type="button" role="tab" aria-controls="viewer-panel"
+      aria-selected="false">Failure mode</button>
+  </div>
+  <section id="viewer-panel" role="tabpanel" aria-labelledby="family-tab">
+    <div class="toolbar">
+      <label>Geometry<select id="geometry"></select></label>
+      <label>Boundary load<select id="case"></select></label>
+      <label>Step around boundary <output id="load-position"></output>
+        <input id="load-slider" type="range" min="0" value="0" step="1"></label>
+    </div>
+    <div id="family-controls" class="mode-controls">
+      <div class="button-group" role="group" aria-label="Family display">
+        <button id="whole-family" type="button" aria-pressed="true">Whole family</button>
+        <button id="selected-line" type="button" aria-pressed="false">Selected line</button>
+      </div>
+      <label class="check"><input id="construction" type="checkbox">Show construction lines</label>
+    </div>
+    <div id="failure-controls" class="mode-controls" hidden>
+      <label>Admissible branch<select id="branch"></select></label>
+      <label>Illustrative motion amplitude <output id="amplitude-label">100%</output>
+        <input id="amplitude" type="range" min="0" max="100" value="100" step="5"></label>
+    </div>
+    <div class="readout">
+      <p id="numbers"></p><p id="interval"></p><p id="status"></p>
+    </div>
+    <p id="selection-announcement" class="sr-only" role="status" aria-live="polite"></p>
+    <div class="plots">
+      <div class="plot">
+        <h2>Right-end load region</h2>
+        <svg id="load-plot" role="img" aria-label="Load boundary linked to the thrust lines. Use the boundary load selector for keyboard access."></svg>
+      </div>
+      <div class="plot">
+        <h2 id="arch-title">Thrust-line family</h2>
+        <svg id="arch-plot" role="img" aria-label="Arch and linked joint-pressure paths. Hover to preview, click or tap to lock."></svg>
+      </div>
+    </div>
+    <div id="family-details">
+      <div class="legend">
+        <span><i class="swatch spectrum"></i>Matching load and pressure path</span>
+        <span>◆ Selected joint pressure point</span>
+        <span><i class="swatch dashed"></i>Moment-exempt terminal extension</span>
+        <span id="construction-legend" hidden><i class="swatch construction"></i>Construction &amp; concurrency points</span>
+      </div>
+      <p class="note">Hover near a boundary point or thrust line to preview its partner. Click or tap to lock it;
+        leaving the plot restores the locked case. At overlapping lines, use the boundary selector to distinguish loads.</p>
+      <p id="family-summary" class="note"></p>
+      <p id="construction-note" class="note" hidden>The thin construction follows resultant-force directions and
+        turns on each block's vertical CoG line. Its blue concurrency points may lie outside the masonry;
+        physical contact is checked at the joint-pressure diamonds.</p>
+    </div>
+    <div id="failure-details" hidden>
+      <div class="legend">
+        <span><i class="swatch inner"></i>Intrados opens (blue ×)</span>
+        <span><i class="swatch outer"></i>Extrados opens (orange ×)</span>
+        <span><i class="swatch pivot"></i>Retained pivot ○</span>
+        <span>◆ Joint pressure point</span>
+        <span><i class="swatch motion"></i>Rigid-motion preview</span>
+      </div>
+      <p class="note">The green shape illustrates onset kinematics. Relative rotations are capped at 10° and
+        reduced if needed to avoid interpenetration. Gray blocks show the original geometry.
+        The amplitude is not elapsed time or a predicted crack width; forces are checked in the original geometry.</p>
+      <h2>Opening coverage across all boundary cases</h2>
+      <p id="coverage-summary"></p>
+      <svg id="coverage" role="img" aria-label="Intrados and extrados ends with verified opening witnesses across loads"></svg>
+      <p class="note">Filled cells have an opening witness under at least one load; hollow cells are pressure-limit
+        candidates without a verified opening witness. Different cells do not necessarily open together.</p>
+      <details>
+        <summary>Selected-load joint diagnostics</summary>
+        <p class="note">Joint j lies between blocks j and j+1. t=0 is intrados; t=1 is extrados.
+          Gap rates are normalized initial velocities. Zero end force does not imply positive separation.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Joint</th><th>t</th><th>Fn inner</th><th>Fn outer</th><th>Friction use</th>
+            <th>Gap inner</th><th>Gap outer</th><th>Selected mode</th></tr></thead>
+          <tbody id="joint-table"></tbody>
+        </table></div>
+      </details>
+    </div>
+  </section>
+  <details><summary>Model, supports and sources</summary>
+    <p>Block 0 is fixed. The right holder permits translation, prevents rotation, and can supply a moment.
+      Both geometries use mesh-volume weights and friction coefficient 0.7 under vertical gravity.</p>
+    <p>This example analyzes opening of existing dry joints between rigid blocks. It does not model cracking
+      within stones, elastic crack initiation, material crushing, or dynamic collapse. Cases without an opening-only
+      witness retain their contact diagnostics. Unloaded but stationary endpoints remain closed in the selected mode.</p>
+    <p><a href="https://web.mit.edu/masonry/papers/block_dejong_ochs_NNJ.pdf">Block, DeJong and Ochsendorf: hinges</a> ·
+      <a href="https://journals.sagepub.com/doi/10.1177/10812865231183355">Alexakis and Makris: funicular versus pressure paths</a></p>
+  </details>
+</main>
+<script id="opening-data" type="application/json">__OPENING_DATA__</script>
+<script>
+(() => {
+  'use strict';
+  const data = JSON.parse(document.getElementById('opening-data').textContent);
+  const byId = id => document.getElementById(id);
+  const geometry = byId('geometry'), caseSelect = byId('case'), branch = byId('branch');
+  const loadSlider = byId('load-slider'), amplitude = byId('amplitude'), construction = byId('construction');
+  const loadPlot = byId('load-plot'), archPlot = byId('arch-plot'), coverage = byId('coverage');
+  const ns = 'http://www.w3.org/2000/svg', colors = ['var(--inner)', 'var(--outer)'];
+  const memory = data.map(() => ({index: 0, branches: {}, amplitude: 100}));
+  const frames = new Map();
+  let mode = 'family', wholeFamily = true, hoverIndex = null, queued = false;
+  let loadPoints = [], archPaths = [], loadFrame = null;
+  const currentGeometry = () => data[Number(geometry.value)];
+  const state = () => memory[Number(geometry.value)];
+  const activeIndex = () => hoverIndex === null ? state().index : hoverIndex;
+  const color = c => 'hsl(' + (c.angle * 180 / Math.PI).toFixed(4) + ' 65% var(--family-lightness))';
+
+  function el(svg, tag, attrs, value) {
+    const node = document.createElementNS(ns, tag);
+    Object.entries(attrs || {}).forEach(([key, val]) => node.setAttribute(key, val));
+    if (value !== undefined) node.textContent = value;
+    svg.appendChild(node); return node;
+  }
+  function text(svg, x, y, value, anchor='start') {
+    return el(svg, 'text', {x, y, 'text-anchor': anchor}, value);
+  }
+  function size(svg) {
+    const {width:w, height:h} = svg.getBoundingClientRect();
+    svg.replaceChildren(); svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h); return [w,h];
+  }
+  function path(svg, points, attrs) {
+    return el(svg, 'polyline', {points:points.map(p=>p.join(',')).join(' '), fill:'none', ...attrs});
+  }
+  function fmt(value) { return Math.abs(value)<1e-8 ? '0' : value.toFixed(5); }
+  function selected() {
+    const g=currentGeometry(), c=g.cases[activeIndex()];
+    const id=c.modes[state().branches[c.id] || 0];
+    return [g,c,id===undefined ? null : g.modes[id]];
+  }
+  function setOptions(select, values) {
+    select.replaceChildren(...values.map(([value,label]) => new Option(label,value)));
+  }
+  function syncControls() {
+    const g=currentGeometry(), s=state(), c=g.cases[s.index];
+    caseSelect.value=s.index; loadSlider.value=s.index;
+    byId('load-position').value=(s.index+1) + ' / ' + g.cases.length;
+    setOptions(branch,c.modes.map((id,i)=>[i,g.modes[id].label + ' branch']));
+    if (!c.modes.length) setOptions(branch,[[0,'No verified opening mode']]);
+    branch.value=s.branches[c.id] || 0; branch.disabled=c.modes.length<2;
+    amplitude.value=s.amplitude;
+  }
+  function announce() {
+    const c=currentGeometry().cases[state().index];
+    byId('selection-announcement').textContent=c.label + ' locked. Fx ' + c.load[0].toFixed(6) +
+      ', Fz ' + c.load[1].toFixed(6) + '. ' + (mode==='family' ? 'Thrust-line family.' : c.status);
+  }
+  function lock(index) {
+    state().index=index; hoverIndex=null; syncControls(); draw(); announce();
+  }
+  function chooseGeometry() {
+    hoverIndex=null;
+    const g=currentGeometry();
+    setOptions(caseSelect,g.cases.map((c,i)=>[i,c.label + ' · ' + c.kind + ' · (' +
+      c.load.map(v=>v.toFixed(3)).join(', ') + ')']));
+    loadSlider.max=g.cases.length-1; syncControls(); draw(); announce();
+  }
+  function chooseMode(next) {
+    mode=next; hoverIndex=null;
+    ['family','failure'].forEach(name=>{
+      const active=name===mode;
+      byId(name+'-tab').setAttribute('aria-selected',String(active));
+      byId(name+'-controls').hidden=!active; byId(name+'-details').hidden=!active;
+    });
+    byId('viewer-panel').setAttribute('aria-labelledby',mode+'-tab');
+    draw(); announce();
+  }
+  function scheduleDraw() {
+    if (!queued) { queued=true; requestAnimationFrame(()=>{ queued=false; draw(); }); }
+  }
+  function preview(index) {
+    if (mode!=='family' || hoverIndex===index) return;
+    hoverIndex=index; scheduleDraw();
+  }
+  function poses(g,m,a) {
+    if (!m || !m.scale) return g.polygons;
+    const rotations=m.velocity.map(v=>{const x=v[2]*m.scale*a; return [Math.cos(x),Math.sin(x)];});
+    const rotate=(r,p)=>[r[0]*p[0]-r[1]*p[1],r[1]*p[0]+r[0]*p[1]];
+    const shifts=[[0,0]];
+    for(let i=1;i<g.polygons.length;i++) {
+      const p=g.joints[i-1][m.pins[i-1]], prev=rotate(rotations[i-1],p), cur=rotate(rotations[i],p);
+      shifts.push([prev[0]+shifts[i-1][0]-cur[0],prev[1]+shifts[i-1][1]-cur[1]]);
+    }
+    return g.polygons.map((poly,i)=>poly.map(p=>{const q=rotate(rotations[i],p);
+      return [q[0]+shifts[i][0],q[1]+shifts[i][1]];}));
+  }
+  function bounds(g) {
+    const key=geometry.value+':'+mode;
+    if (frames.has(key)) return frames.get(key);
+    const b=[Infinity,-Infinity,Infinity,-Infinity];
+    const include=p=>{b[0]=Math.min(b[0],p[0]);b[1]=Math.max(b[1],p[0]);
+      b[2]=Math.min(b[2],p[1]);b[3]=Math.max(b[3],p[1]);};
+    g.polygons.forEach(poly=>poly.forEach(include));
+    // Use one frame for all cases, including construction and enlarged poses.
+    // Selection and amplitude changes must not zoom or clip the arch.
+    if (mode==='family') g.cases.forEach(c=>c.construction.forEach(include));
+    else g.modes.forEach(m=>{
+      for(let step=0;step<=100;step++) poses(g,m,step/100).forEach(poly=>poly.forEach(include));
+    });
+    b[0]-=.35;b[1]+=.35;b[2]-=.3;b[3]+=.3;
+    frames.set(key,b); return b;
+  }
+  function drawLoads(g,c) {
+    const [w,h]=size(loadPlot), l=60,r=w-20,t=30,b=h-45;
+    const xs=g.region.map(p=>p[0]),zs=g.region.map(p=>p[1]);
+    let xmin=Math.min(...xs),xmax=Math.max(...xs),zmin=Math.min(...zs),zmax=Math.max(...zs);
+    const xp=(xmax-xmin)*.12,zp=(zmax-zmin)*.14; xmin-=xp;xmax+=xp;zmin-=zp;zmax+=zp;
+    const xy=p=>[l+(p[0]-xmin)/(xmax-xmin)*(r-l),b-(p[1]-zmin)/(zmax-zmin)*(b-t)];
+    loadFrame=[l,r,t,b]; loadPoints=g.cases.map(item=>xy(item.load));
+    el(loadPlot,'rect',{x:l,y:t,width:r-l,height:b-t,fill:'none',stroke:'var(--line)'});
+    el(loadPlot,'polygon',{points:g.region.map(xy).map(p=>p.join(',')).join(' '),
+      fill:'var(--region)',stroke:'var(--line)','stroke-width':1});
+    g.cases.forEach((item,i)=>{
+      path(loadPlot,[loadPoints[i],loadPoints[(i+1)%g.cases.length]],
+        {stroke:color(item),'stroke-width':2.5,'data-boundary-case':item.id});
+    });
+    for(let i=0;i<3;i++) {
+      const x=xmin+(xmax-xmin)*i/2,z=zmin+(zmax-zmin)*i/2;
+      text(loadPlot,xy([x,zmin])[0],b+19,x.toFixed(2),'middle');
+      text(loadPlot,l-7,xy([xmin,z])[1]+4,z.toFixed(2),'end');
+    }
+    text(loadPlot,(l+r)/2,h-4,'Right-end Fx','middle');
+    text(loadPlot,l,16,'Fz (positive upward)');
+    const locked=loadPoints[state().index];
+    el(loadPlot,'circle',{cx:locked[0],cy:locked[1],r:7,fill:'var(--bg)',
+      stroke:'var(--fg)','stroke-width':1.5,'data-locked-case':g.cases[state().index].id});
+    const p=loadPoints[activeIndex()];
+    el(loadPlot,'circle',{cx:p[0],cy:p[1],r:5,fill:color(c),
+      stroke:'var(--fg)','stroke-width':1,'data-active-case':c.id});
+  }
+  function drawArch(g,c,m) {
+    const [w,h]=size(archPlot), [xmin,xmax,zmin,zmax]=bounds(g);
+    const scale=Math.min((w-28)/(xmax-xmin),(h-52)/(zmax-zmin));
+    const ox=w/2-(xmin+xmax)*scale/2,oy=(h-24)/2+(zmin+zmax)*scale/2;
+    const xy=p=>[ox+p[0]*scale,oy-p[1]*scale];
+    const polygon=(points,attrs)=>el(archPlot,'polygon',{
+      points:points.map(xy).map(p=>p.join(',')).join(' '),...attrs});
+    g.polygons.forEach((poly,i)=>polygon(poly,{
+      fill:'var(--muted)',stroke:'var(--line)','stroke-width':.7,'data-block':i}));
+    archPaths=g.cases.map(item=>item.pressure.map(xy));
+    if (mode==='family') {
+      if (wholeFamily) g.cases.forEach((item,i)=>path(archPlot,archPaths[i],{
+        stroke:color(item),'stroke-width':.8,opacity:.22,'data-family-case':item.id}));
+      c.extensions.forEach(points=>path(archPlot,points.map(xy),{
+        stroke:color(c),'stroke-width':1.3,'stroke-dasharray':'5 4','data-terminal-extension':c.id}));
+      if (construction.checked) {
+        path(archPlot,c.construction.map(xy),{stroke:'var(--construction)',
+          'stroke-width':1.1,'stroke-dasharray':'2 3','data-construction':c.id});
+        c.kinks.forEach(p=>{const [x,y]=xy(p);el(archPlot,'circle',{
+          cx:x,cy:y,r:2.8,fill:'var(--construction)','data-concurrency':c.id});});
+      }
+      path(archPlot,archPaths[activeIndex()],{stroke:'var(--bg)','stroke-width':4.5});
+      path(archPlot,archPaths[activeIndex()],{stroke:color(c),'stroke-width':2.5,'data-active-path':c.id});
+    } else {
+      if(m && m.scale && Number(amplitude.value)>0) poses(g,m,Number(amplitude.value)/100).forEach(poly=>polygon(poly,{
+        fill:'none',stroke:'var(--motion)','stroke-width':1.5,'data-preview-block':'true'}));
+      g.joints.forEach((joint,j)=>joint.forEach((p,side)=>{
+        const [x,y]=xy(p);
+        if(m && m.openings[j][side]) {
+          path(archPlot,[[x-5,y-5],[x+5,y+5]],{stroke:colors[side],'stroke-width':2,'data-opening':j+':'+side});
+          path(archPlot,[[x-5,y+5],[x+5,y-5]],{stroke:colors[side],'stroke-width':2});
+        }
+        if(m && m.pivots[j][side]) el(archPlot,'circle',{
+          cx:x,cy:y,r:5,fill:'none',stroke:'var(--fg)','stroke-width':1.5,'data-pivot':j+':'+side});
+      }));
+    }
+    c.pressure.forEach((p,j)=>{const [x,y]=xy(p);el(archPlot,'polygon',{
+      points:[[x,y-3.5],[x+3.5,y],[x,y+3.5],[x-3.5,y]].map(q=>q.join(',')).join(' '),
+      fill:mode==='family'?color(c):'var(--fg)',stroke:'var(--bg)','stroke-width':.8,'data-pressure':j});});
+    g.centers.forEach((p,i)=>{
+      const q=xy(p), label=text(archPlot,q[0],q[1]+4,i,'middle');
+      label.setAttribute('paint-order','stroke');label.setAttribute('stroke','var(--muted)');
+      label.setAttribute('stroke-width','3');label.setAttribute('stroke-linejoin','round');
+    });
+    text(archPlot,14,h-7,'0 fixed');text(archPlot,w-14,h-7,'19: rotation held','end');
+    byId('arch-title').textContent=mode==='family'?
+      (wholeFamily?'Thrust-line family':'Selected thrust line'):'Initial opening mechanism';
+  }
+  function drawCoverage(g) {
+    const [w]=size(coverage), left=76, cell=(w-left-12)/19;
+    text(coverage,left,15,'Joint index (between blocks j and j+1)');
+    for(let j=0;j<19;j++) {
+      if(w>500 || j%2===0) text(coverage,left+(j+.5)*cell,35,j,'middle');
+      for(let side=0;side<2;side++) {
+        const filled=g.openingCoverage[j][side],candidate=g.candidateCoverage[j][side];
+        el(coverage,'rect',{x:left+j*cell+1,y:45+side*31,width:Math.max(1,cell-2),height:23,
+          fill:filled ? colors[side] : 'var(--muted)',stroke:candidate&&!filled ? colors[side] : 'none'});
+      }
+    }
+    text(coverage,left-8,61,'Intrados','end');text(coverage,left-8,92,'Extrados','end');
+    const count=a=>a.filter(row=>row.some(Boolean)).length;
+    byId('coverage-summary').textContent=count(g.candidateCoverage)+'/19 candidate joints; '+
+      count(g.openingCoverage)+'/19 with verified opening witnesses. Two-support self-weight check: '+
+      (g.selfWeight?'feasible':'infeasible')+'.';
+  }
+  function drawDiagnostics(g,c,m) {
+    const tbody=byId('joint-table');tbody.replaceChildren();
+    g.joints.forEach((joint,j)=>{
+      const opened=m ? ['intrados','extrados'].filter((s,k)=>m.openings[j][k]).join(' + ') : '';
+      const unloaded=c.candidates[j].some(Boolean);
+      const values=[j,fmt(c.parameters[j]),...c.forces[j].map(fmt),fmt(c.friction[j]),
+        ...(m?m.gaps[j].map(fmt):['—','—']),!m ? 'motion unverified' :
+          opened ? opened+' opens' : unloaded?'unloaded end; no opening in this mode':'closed'];
+      const tr=document.createElement('tr');values.forEach(value=>{const td=document.createElement('td');
+        td.textContent=value;tr.appendChild(td);});tbody.appendChild(tr);
+    });
+  }
+  function draw() {
+    const [g,c,m]=selected(), family=mode==='family';
+    amplitude.disabled=!m || !m.scale;
+    const angle=m ? m.maxRelativeDegrees*Number(amplitude.value)/100 : 0;
+    byId('amplitude-label').value=amplitude.value+'% · '+angle.toFixed(1)+'° max joint rotation';
+    byId('numbers').textContent=(hoverIndex===null?'Locked · ':'Preview · ')+c.label+
+      ' · Fx = '+c.load[0].toFixed(6)+' · Fz = '+c.load[1].toFixed(6)+
+      ' · max friction utilization = '+Math.max(...c.friction).toFixed(4);
+    byId('interval').textContent='Right insertion x = '+c.insertion.toFixed(6)+
+      ' · admissible interval ['+c.insertionInterval.map(v=>v.toFixed(6)).join(', ')+']';
+    byId('status').textContent=family ?
+      'Joint-admissible pressure path · '+(hoverIndex===null?'selection shared with Failure mode':'click or tap to lock') :
+      c.status+(m ? ' · '+m.previewStatus+' · branch '+m.label : '');
+    byId('construction-legend').hidden=!construction.checked;
+    byId('construction-note').hidden=!construction.checked;
+    byId('family-summary').textContent=g.cases.length+' unique boundary loads from '+g.sampleCount+
+      ' ray samples plus certified facet midpoints and vertices. Each path uses its admissible insertion midpoint. '+
+      'Colors follow boundary order; interior loads and other insertion choices are not included.';
+    drawLoads(g,c);drawArch(g,c,m);
+    if(!family) {drawCoverage(g);drawDiagnostics(g,c,m);}
+  }
+  function pointer(event,svg) {
+    const rect=svg.getBoundingClientRect();return [event.clientX-rect.left,event.clientY-rect.top];
+  }
+  function segmentDistance(p,a,b) {
+    const dx=b[0]-a[0],dy=b[1]-a[1],length=dx*dx+dy*dy;
+    const t=length ? Math.max(0,Math.min(1,((p[0]-a[0])*dx+(p[1]-a[1])*dy)/length)) : 0;
+    return (p[0]-a[0]-t*dx)**2+(p[1]-a[1]-t*dy)**2;
+  }
+  function nearest(event,svg,click) {
+    const p=pointer(event,svg), arch=svg===archPlot;
+    if (arch && mode!=='family') return null;
+    if (!arch && (!loadFrame || p[0]<loadFrame[0] || p[0]>loadFrame[1] ||
+      p[1]<loadFrame[2] || p[1]>loadFrame[3])) return null;
+    const distance=i=>arch ? archPaths[i].slice(1).reduce((best,b,j)=>
+      Math.min(best,segmentDistance(p,archPaths[i][j],b)),Infinity) :
+      (p[0]-loadPoints[i][0])**2+(p[1]-loadPoints[i][1])**2;
+    let index=activeIndex(),best=distance(index);
+    // Begin with the active path so an exact overlap does not flicker between cases.
+    if (!arch || wholeFamily) currentGeometry().cases.forEach((c,i)=>{
+      const d=distance(i);if(d<best-1e-6){best=d;index=i;}
+    });
+    const radius=event.pointerType==='touch'?22:(arch?8:14);
+    return (!arch && click) || best<=radius*radius ? index : null;
+  }
+  [loadPlot,archPlot].forEach(svg=>{
+    svg.onpointermove=event=>{
+      if(event.pointerType==='touch' || mode!=='family') return;
+      const index=nearest(event,svg,false);svg.style.cursor=index===null?'default':'pointer';preview(index);
+    };
+    svg.onpointerleave=()=>preview(null);
+    svg.onclick=event=>{
+      // Click coordinates can be integer-rounded while pointermove is fractional.
+      // Lock the visible preview so a click cannot jump to an adjacent dense sample.
+      const index=mode==='family' && hoverIndex!==null ? hoverIndex : nearest(event,svg,true);
+      if(index!==null)lock(index);
+    };
+  });
+  ['family','failure'].forEach(name=>{
+    const tab=byId(name+'-tab');
+    tab.onclick=()=>chooseMode(name);
+    tab.onkeydown=event=>{
+      if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) {
+        event.preventDefault();
+        const next=event.key==='Home'?'family':event.key==='End'?'failure':name==='family'?'failure':'family';
+        chooseMode(next);byId(next+'-tab').focus();
+      }
+    };
+  });
+  function displayFamily(all) {
+    wholeFamily=all;hoverIndex=null;
+    byId('whole-family').setAttribute('aria-pressed',String(all));
+    byId('selected-line').setAttribute('aria-pressed',String(!all));draw();
+  }
+  byId('whole-family').onclick=()=>displayFamily(true);
+  byId('selected-line').onclick=()=>displayFamily(false);
+  construction.onchange=()=>{hoverIndex=null;draw();};
+  setOptions(geometry,data.map((g,i)=>[i,g.label]));
+  geometry.onchange=chooseGeometry;caseSelect.onchange=()=>lock(Number(caseSelect.value));
+  branch.onchange=()=>{
+    const c=currentGeometry().cases[state().index];state().branches[c.id]=Number(branch.value);draw();announce();
+  };
+  loadSlider.oninput=()=>lock(Number(loadSlider.value));
+  amplitude.oninput=()=>{state().amplitude=Number(amplitude.value);draw();};
+  chooseGeometry();
+  new ResizeObserver(scheduleDraw).observe(byId('viewer-panel'));
+})();
+</script>
+</body>
+</html>

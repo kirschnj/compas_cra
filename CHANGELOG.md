@@ -21,10 +21,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Add a full-arch graphic-statics example linking a maximal joint-admissible safe-load contour to a thrust-line
   family, with supplied-case pressure-point and friction diagnostics that distinguish CoG concurrency points from
   physical joint resultants.
+* Add a four-geometry thrust-line comparison for circular, symmetric-catenary, and mirrored asymmetric-catenary
+  arches, with separate self-weight stability and one-sided anchor-family checks.
+* Add a circular/catenary joint-opening comparison with certified right-load boundaries, verified initial
+  rigid-block mechanisms, and an offline viewer distinguishing pressure-limit candidates from opening edges.
 
 ### Changed
 
+* Upgrade the joint-opening viewer with linked thrust-line family and failure tabs, bidirectional load/path
+  selection, optional construction lines, and shared boundary-case and mechanism-branch selections.
+* Enlarge the joint-opening example's motion preview to a collision-checked ten-degree range, with a
+  rotation readout and automatic framing so opening gaps are easier to inspect.
 * Fix Pyomo force-objective weighting for three- and four-component contact force layouts.
+* Correct the full-arch thrust examples to use mesh-volume weights and to reconstruct one-sided asymmetric
+  pressure paths from the same right side as the applied RBE load.
 * Allow robust RBE analyses to use shifted feasible load regions that do not contain the load-increment origin.
 * Allow robust RBE analyses to project visible loads from bounded hidden point forces at candidate application points.
 * Allow robust RBE plots to clip unbounded regions to explicit visualization limits.

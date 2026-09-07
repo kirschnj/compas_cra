@@ -8,23 +8,23 @@ import numpy as np
 import pytest
 
 EXAMPLE_PATH = Path(__file__).parents[1] / "docs" / "examples" / "19_4_1_rbe_thrust_line_family_arch.py"
-SCREENSHOT_CASES = (
-    ((-5.0, -8.6), -0.46, [[-5.5052, 1.6695], [0.4374, 5.0564], [5.5128, 1.5826]]),
-    ((-3.5, -9.05), 0.35, [[-5.4951, 0.4123], [0.4303, 6.0], [5.4920, 1.7026]]),
-    ((-2.9, -8.6), 0.47, [[-5.5021, 0.1153], [0.4198, 5.9354], [5.4798, -0.0359]]),
-    ((-3.5, -8.15), -0.26, [[-5.4882, 1.7908], [0.4368, 5.8513], [5.4962, 0.2548]]),
+SUPPLIED_CASES = (
+    ((-5.0, -8.6), -0.46),
+    ((-3.5, -9.05), 0.35),
+    ((-2.9, -8.6), 0.47),
+    ((-3.5, -8.15), -0.26),
 )
 EXPECTED_JOINT_OVERRUNS = {
-    "R1": {0: 0.0335556146},
-    "R2": {10: 0.0190783369},
-    "R3": {},
-    "R4": {8: 0.0078878274, 15: 0.0011813533},
+    "R1": {0: 0.0333542962, 18: 0.0278495518},
+    "R2": {10: 0.0643839969, 11: 0.0337962589},
+    "R3": {9: 0.0039287934},
+    "R4": {7: 0.0071919364, 8: 0.0342437519},
 }
 EXPECTED_FITS = {
-    "R1": ((-4.99844918, -8.60260093), -0.42681436),
-    "R2": ((-3.5, -9.05), 0.35743702),
-    "R3": ((-2.9, -8.6), 0.47),
-    "R4": ((-3.50314845, -8.15525266), -0.25546022),
+    "R1": ((-5.0, -8.6), -0.4273186255),
+    "R2": ((-3.5, -9.05), 0.3750543939),
+    "R3": ((-2.9, -8.6), 0.4713248264),
+    "R4": ((-3.5, -8.15), -0.2452079639),
 }
 
 
@@ -58,23 +58,40 @@ def case_diagnostics(example, arch_data, admissible_model):
     return example["supplied_case_diagnostics"](geometry, base.THICKNESS, rbe_boundary)
 
 
-@pytest.mark.parametrize("anchor_load,insertion_fraction,expected_kinks", SCREENSHOT_CASES)
-def test_supplied_cases_match_screenshot_slopes(example, arch_data, anchor_load, insertion_fraction, expected_kinks):
+def test_graphic_statics_weights_are_exact_mesh_weights(example, arch_data):
+    _, assembly, geometry = arch_data
+    expected = np.asarray(
+        [assembly.graph.node_attribute(node, "block").volume() for node in assembly.graph.nodes()],
+        dtype=float,
+    )
+    np.testing.assert_allclose(geometry.weights, expected, atol=1e-12, rtol=0.0)
+    assert not np.any(np.isclose(geometry.weights, 0.863938, atol=1e-7, rtol=0.0))
+
+
+@pytest.mark.parametrize("anchor_load,insertion_fraction", SUPPLIED_CASES)
+def test_supplied_cases_use_mesh_weight_force_directions(example, arch_data, anchor_load, insertion_fraction):
     base, _, geometry = arch_data
     repository_load = np.asarray([anchor_load[0], -anchor_load[1]])
     insertion_x = geometry.left_support_x + insertion_fraction * base.THICKNESS
     trace = example["trace_thrust_line"](repository_load, insertion_x, geometry)
     points = example["trace_polyline"](trace)
+    diagram = example["force_diagram"](repository_load, geometry.weights)
 
     for segment, direction in zip(np.diff(points, axis=0), trace.directions):
         assert example["cross_2d"](segment, direction) == pytest.approx(0.0, abs=1e-9)
-    np.testing.assert_allclose(trace.kinks[[0, 10, 19]], expected_kinks, atol=0.05, rtol=0.0)
+    np.testing.assert_allclose(np.diff(diagram.nodes[:, 1]), -geometry.weights, atol=1e-12, rtol=0.0)
+    np.testing.assert_allclose(
+        np.diff(trace.directions, axis=0),
+        np.column_stack([np.zeros(len(geometry.weights)), -geometry.weights]),
+        atol=1e-12,
+        rtol=0.0,
+    )
     assert trace.insertion_x == pytest.approx(geometry.left_support_x + insertion_fraction * base.THICKNESS)
 
 
 def test_cog_points_are_concurrency_points_not_containment_constraints(example, arch_data):
     base, _, geometry = arch_data
-    anchor_load, insertion_fraction = SCREENSHOT_CASES[1][:2]
+    anchor_load, insertion_fraction = SUPPLIED_CASES[1]
     repository_load = np.asarray([anchor_load[0], -anchor_load[1]])
     trace = example["trace_thrust_line"](
         repository_load,
@@ -97,7 +114,7 @@ def test_cog_points_are_concurrency_points_not_containment_constraints(example, 
         )
         assert kink[0] == pytest.approx(geometry.centers[block_index, 0], abs=1e-12)
         np.testing.assert_allclose(
-            trace.directions[block_index] + [0.0, -example["BLOCK_WEIGHT"]],
+            trace.directions[block_index] + [0.0, -geometry.weights[block_index]],
             trace.directions[block_index + 1],
             atol=1e-12,
             rtol=0.0,
@@ -123,7 +140,7 @@ def test_exact_supplied_cases_have_only_documented_joint_misses(case_diagnostics
             check.interface_index: check.overrun for check in diagnostic.supplied_checks if check.overrun > 1e-12
         }
         assert observed == pytest.approx(EXPECTED_JOINT_OVERRUNS[diagnostic.label], abs=1e-9)
-        assert all(check.valid for check in diagnostic.supplied_checks) is (diagnostic.label == "R3")
+        assert not all(check.valid for check in diagnostic.supplied_checks)
 
 
 def test_nearest_fitted_cases_are_joint_admissible(example, arch_data, case_diagnostics):
@@ -197,25 +214,21 @@ def test_maximal_admissible_contour_contains_only_valid_lines(example, arch_data
         assert example["joint_violations"](sample.trace, geometry) == []
 
 
-def test_outward_probe_is_infeasible_where_joint_boundary_is_active(example, arch_data, admissible_model):
-    _, _, geometry = arch_data
-    _, center, family = admissible_model
-    active = [sample for sample in family if sample.admissible_radius < sample.rbe_radius - 1e-6]
-    assert active
-
-    step = max(1, len(active) // 24)
-    for sample in active[::step]:
-        direction = np.asarray([np.cos(sample.ray_angle), np.sin(sample.ray_angle)])
-        radial_step = min(1e-5, 0.5 * (sample.rbe_radius - sample.admissible_radius))
-        outward_load = center + (sample.admissible_radius + radial_step) * direction
-        assert not example["load_is_joint_admissible"](outward_load, geometry)
+def test_pressure_path_boundary_coincides_with_rbe_boundary(admissible_model):
+    _, _, family = admissible_model
+    np.testing.assert_allclose(
+        [sample.admissible_radius for sample in family],
+        [sample.rbe_radius for sample in family],
+        atol=1e-12,
+        rtol=0.0,
+    )
 
 
 def test_maximal_admissible_contour_has_expected_extents(example, admissible_model):
     _, _, family = admissible_model
     anchor_loads = example["anchor_plot_coordinates"]([sample.admissible_load for sample in family])
 
-    assert float(np.min(anchor_loads[:, 0])) == pytest.approx(-5.01, abs=0.02)
-    assert float(np.max(anchor_loads[:, 0])) == pytest.approx(-2.81, abs=0.02)
-    assert float(np.min(anchor_loads[:, 1])) == pytest.approx(-9.10, abs=0.02)
-    assert float(np.max(anchor_loads[:, 1])) == pytest.approx(-8.14, abs=0.02)
+    assert float(np.min(anchor_loads[:, 0])) == pytest.approx(-5.0373, abs=0.01)
+    assert float(np.max(anchor_loads[:, 0])) == pytest.approx(-2.7804, abs=0.01)
+    assert float(np.min(anchor_loads[:, 1])) == pytest.approx(-9.1017, abs=0.01)
+    assert float(np.max(anchor_loads[:, 1])) == pytest.approx(-8.1061, abs=0.01)

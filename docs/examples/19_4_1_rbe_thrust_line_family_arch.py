@@ -12,7 +12,6 @@ from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon as PolygonPatch
 from scipy.optimize import linprog
-from scipy.optimize import minimize
 from scipy.spatial import ConvexHull
 
 from compas_cra.equilibrium.rbe_robust import _inner_polygon
@@ -20,14 +19,10 @@ from compas_cra.equilibrium.rbe_robust import _inner_polygon
 NUM_SUPPORT_DIRECTIONS = 360
 NUM_CONTOUR_DIRECTIONS = 360
 PLOT_SAMPLE_STRIDE = 4
-RAY_SCAN_STEPS = 16
-BLOCK_WEIGHT = 0.863938
 FRICTION_COEFFICIENT = 0.7
+DENSITY = 1.0
 THRUST_CENTER_FX = -4.0
 CONTAINMENT_TOLERANCE = 1e-9
-NUMERICAL_RADIUS_GUARD = 1e-10
-BISECTION_STEPS = 55
-FIT_INTERVAL_WIDTH = 1e-7
 FIT_INSERTION_GUARD = 1e-9
 REFERENCE_CASES = (
     ("R1", (-5.0, -8.6), -0.46),
@@ -35,10 +30,6 @@ REFERENCE_CASES = (
     ("R3", (-2.9, -8.6), 0.47),
     ("R4", (-3.5, -8.15), -0.26),
 )
-FITTED_LOAD_SEEDS = {
-    "R1": (-4.99844924, -8.60260083),
-    "R4": (-3.50314835, -8.15525256),
-}
 OUTPUT_SVG = Path(__file__).with_suffix(".svg")
 DIAGNOSTIC_SVG = Path(__file__).with_name("19_4_1_rbe_thrust_line_supplied_cases.svg")
 INSIDE_COLOR = "#009E73"
@@ -53,6 +44,7 @@ class ArchGeometry:
     """Two-dimensional geometry needed by the graphic-statics construction."""
 
     centers: np.ndarray
+    weights: np.ndarray
     block_polygons: list
     block_halfspaces: list
     interfaces: list
@@ -189,14 +181,16 @@ def unique_rows(points, tolerance=1e-9):
 
 
 def build_arch_geometry(assembly):
-    """Extract convex block polygons, halfspaces, CoGs, and interfaces."""
+    """Extract convex block polygons, mesh weights, CoGs, and interfaces."""
     nodes = list(assembly.graph.nodes())
     centers = []
+    weights = []
     polygons = []
     halfspaces = []
     for node in nodes:
         block = assembly.graph.node_attribute(node, "block")
         centers.append(point_xz(block.center()))
+        weights.append(block.volume() * DENSITY)
         points = unique_rows(point_xz(block.vertex_coordinates(vertex)) for vertex in block.vertices())
         hull = ConvexHull(np.asarray(points, dtype=float))
         polygons.append(np.asarray(points, dtype=float)[hull.vertices])
@@ -215,6 +209,7 @@ def build_arch_geometry(assembly):
     left_support_x = float(np.min(polygons[0][:, 0]))
     return ArchGeometry(
         centers=np.asarray(centers, dtype=float),
+        weights=np.asarray(weights, dtype=float),
         block_polygons=polygons,
         block_halfspaces=halfspaces,
         interfaces=interfaces,
@@ -246,17 +241,20 @@ def solve_primal_rbe_boundary(base, problem, num_directions=NUM_SUPPORT_DIRECTIO
     return np.asarray(polygon, dtype=float)
 
 
-def force_diagram(load, block_count):
+def force_diagram(load, weights):
     """Construct the force diagram that determines all form-diagram slopes.
 
     ``load`` uses the example-19 repository convention: ``Fz`` is positive
     upward on the held rightmost block. The displayed left-anchor reaction is
     ``(Fx, -Fz)``. Consequently that anchor vector is the pole, while the
-    cumulative block weights form a vertical load line through the origin.
+    cumulative mesh-derived block weights form a vertical load line through
+    the origin.
     """
     load = np.asarray(load, dtype=float)
+    weights = np.asarray(weights, dtype=float)
     pole = np.asarray([load[0], -load[1]], dtype=float)
-    nodes = np.asarray([[0.0, -index * BLOCK_WEIGHT] for index in range(block_count + 1)], dtype=float)
+    nodes = np.zeros((len(weights) + 1, 2), dtype=float)
+    nodes[1:, 1] = -np.cumsum(weights)
     directions = nodes - pole
     if np.any(np.abs(directions[:, 0]) <= 1e-12):
         raise ValueError("Graphic-statics construction requires a nonzero horizontal anchor component.")
@@ -294,7 +292,7 @@ def line_intersection(point, direction, line_points):
 
 def trace_thrust_line(load, insertion_x, geometry):
     """Trace the form diagram using the slopes supplied by the force diagram."""
-    diagram = force_diagram(load, len(geometry.centers))
+    diagram = force_diagram(load, geometry.weights)
     point = np.asarray([insertion_x, 0.0], dtype=float)
     kinks = []
     for index, center in enumerate(geometry.centers):
@@ -378,7 +376,9 @@ def joint_checks(trace, geometry):
         tangent = interface[1] - interface[0]
         tangent /= np.linalg.norm(tangent)
         normal = np.asarray([-tangent[1], tangent[0]], dtype=float)
-        normal_component = abs(float(np.dot(force, normal)))
+        if normal[0] < 0.0:
+            normal *= -1.0
+        normal_component = float(np.dot(force, normal))
         tangent_component = abs(float(np.dot(force, tangent)))
         if normal_component <= CONTAINMENT_TOLERANCE:
             friction_utilization = np.inf
@@ -464,30 +464,6 @@ def load_is_joint_admissible(load, geometry):
     return trace_is_joint_admissible(trace, geometry)
 
 
-def maximum_admissible_radius(center, direction, rbe_radius, geometry):
-    """Return the first loss of joint admissibility along a center-connected ray."""
-    if not load_is_joint_admissible(center, geometry):
-        raise ValueError("The configured thrust-family center has no admissible insertion interval.")
-
-    previous_radius = 0.0
-    for step in range(1, RAY_SCAN_STEPS + 1):
-        radius = rbe_radius * step / float(RAY_SCAN_STEPS)
-        if load_is_joint_admissible(center + radius * direction, geometry):
-            previous_radius = radius
-            continue
-
-        lower = previous_radius
-        upper = radius
-        for _ in range(BISECTION_STEPS):
-            candidate = 0.5 * (lower + upper)
-            if load_is_joint_admissible(center + candidate * direction, geometry):
-                lower = candidate
-            else:
-                upper = candidate
-        return lower
-    return rbe_radius
-
-
 def assign_boundary_parameters(samples):
     """Assign normalized admissible-contour arclength to ordered family samples."""
     edge_lengths = np.asarray(
@@ -507,7 +483,7 @@ def assign_boundary_parameters(samples):
 
 
 def build_admissible_contour(rbe_boundary, geometry, num_directions=NUM_CONTOUR_DIRECTIONS):
-    """Trace the maximal joint-admissible contour connected to the configured center."""
+    """Reconstruct every radial sample directly on the RBE boundary."""
     center = np.asarray([THRUST_CENTER_FX, float(np.mean(rbe_boundary[:, 1]))], dtype=float)
     if not load_is_joint_admissible(center, geometry):
         raise ValueError("The configured thrust-family center has no admissible insertion interval.")
@@ -517,24 +493,15 @@ def build_admissible_contour(rbe_boundary, geometry, num_directions=NUM_CONTOUR_
     for angle in np.linspace(0.0, 2.0 * np.pi, num_directions, endpoint=False):
         direction = np.asarray([np.cos(angle), np.sin(angle)], dtype=float)
         rbe_radius = rbe_ray_radius(center, direction, halfspaces)
-        admissible_radius = maximum_admissible_radius(center, direction, rbe_radius, geometry)
-        admissible_load = center + admissible_radius * direction
+        admissible_radius = rbe_radius
+        admissible_load = center + rbe_radius * direction
         interval = insertion_interval(admissible_load, geometry)
         if not interval.feasible:
-            raise ValueError("An admissible-boundary load unexpectedly has an empty insertion interval.")
+            raise ValueError("An RBE-boundary load unexpectedly has an empty insertion interval.")
         trace = trace_thrust_line(admissible_load, interval.midpoint, geometry)
         violations = joint_violations(trace, geometry)
         if violations:
-            admissible_radius = max(
-                0.0,
-                admissible_radius - NUMERICAL_RADIUS_GUARD * max(1.0, rbe_radius),
-            )
-            admissible_load = center + admissible_radius * direction
-            interval = insertion_interval(admissible_load, geometry)
-            trace = trace_thrust_line(admissible_load, interval.midpoint, geometry)
-            violations = joint_violations(trace, geometry)
-        if violations:
-            raise ValueError("An admissible-boundary trace violates a physical joint: {}.".format(violations[0]))
+            raise ValueError("An RBE-boundary trace violates a physical joint: {}.".format(violations[0]))
         samples.append(
             FamilySample(
                 boundary_parameter=0.0,
@@ -568,44 +535,16 @@ def projected_insertion(interval, requested_x):
 
 
 def fit_anchor_load(label, supplied_anchor_load, geometry):
-    """Return the nearest load whose finite-joint insertion interval is non-empty."""
+    """Keep a supplied load fixed when it admits a mesh-weight insertion."""
     supplied_anchor_load = np.asarray(supplied_anchor_load, dtype=float)
     repository_load = np.asarray([supplied_anchor_load[0], -supplied_anchor_load[1]], dtype=float)
     interval = insertion_interval(repository_load, geometry)
-    if interval.feasible:
-        trace = trace_thrust_line(repository_load, interval.midpoint, geometry)
-        if maximum_friction_utilization(joint_checks(trace, geometry)) <= 1.0 + CONTAINMENT_TOLERANCE:
-            return supplied_anchor_load.copy()
-
-    seed = np.asarray(FITTED_LOAD_SEEDS[label], dtype=float)
-
-    def interval_width(anchor_load):
-        load = np.asarray([anchor_load[0], -anchor_load[1]], dtype=float)
-        candidate = insertion_interval(load, geometry)
-        return candidate.upper - candidate.lower
-
-    def friction_margin(anchor_load):
-        load = np.asarray([anchor_load[0], -anchor_load[1]], dtype=float)
-        trace = trace_thrust_line(load, 0.0, geometry)
-        return 1.0 + CONTAINMENT_TOLERANCE - maximum_friction_utilization(joint_checks(trace, geometry))
-
-    result = minimize(
-        lambda anchor_load: float(np.dot(anchor_load - supplied_anchor_load, anchor_load - supplied_anchor_load)),
-        seed,
-        method="SLSQP",
-        bounds=[
-            (supplied_anchor_load[0] - 0.5, supplied_anchor_load[0] + 0.5),
-            (supplied_anchor_load[1] - 0.5, supplied_anchor_load[1] + 0.5),
-        ],
-        constraints=(
-            {"type": "ineq", "fun": lambda anchor_load: interval_width(anchor_load) - FIT_INTERVAL_WIDTH},
-            {"type": "ineq", "fun": friction_margin},
-        ),
-        options={"ftol": 1e-13, "maxiter": 2000},
-    )
-    if not result.success:
-        raise RuntimeError("Could not fit supplied case {}: {}".format(label, result.message))
-    return np.asarray(result.x, dtype=float)
+    if not interval.feasible:
+        raise ValueError("Supplied case {} has no mesh-weight insertion interval.".format(label))
+    trace = trace_thrust_line(repository_load, interval.midpoint, geometry)
+    if maximum_friction_utilization(joint_checks(trace, geometry)) > 1.0 + CONTAINMENT_TOLERANCE:
+        raise ValueError("Supplied case {} violates friction for every insertion.".format(label))
+    return supplied_anchor_load.copy()
 
 
 def supplied_case_diagnostics(geometry, block_thickness, rbe_boundary):
@@ -889,8 +828,8 @@ def plot_diagnostic_case(axes, diagnostic, geometry, block_indices=None, title=N
 def plot_fit_summary(axes, diagnostics):
     """Summarize exact-to-fitted changes without hiding supplied values."""
     axes.axis("off")
-    axes.set_title("Nearest joint-admissible reconstructions", fontsize=10)
-    lines = ["case     fitted anchor        fitted insertion    governing exact joint"]
+    axes.set_title("Mesh-weight insertion corrections", fontsize=10)
+    lines = ["case     fixed supplied load   fitted insertion    governing exact joint"]
     for diagnostic in diagnostics:
         misses = [check for check in diagnostic.supplied_checks if check.overrun > CONTAINMENT_TOLERANCE]
         if misses:
@@ -922,8 +861,8 @@ def plot_fit_summary(axes, diagnostics):
     axes.text(
         0.02,
         0.20,
-        "CoG circles are unconstrained concurrency points.\n"
-        "Validity is determined at finite joint diamonds and by friction.",
+        "The supplied load is held fixed; only insertion is projected.\n"
+        "CoG circles are unconstrained concurrency points.",
         transform=axes.transAxes,
         fontsize=9,
         va="top",
@@ -970,9 +909,9 @@ def plot_supplied_case_diagnostics(diagnostics, geometry):
 
     zooms = (
         (figure.add_subplot(grid[2, 0]), by_label["R1"], (0, 1), "R1: interface 0 exact overrun"),
-        (figure.add_subplot(grid[2, 1]), by_label["R2"], (10, 11), "R2 top: interface 10 exact overrun"),
-        (figure.add_subplot(grid[2, 2]), by_label["R4"], (8, 9), "R4 bottom: interface 8 exact overrun"),
-        (figure.add_subplot(grid[2, 3]), by_label["R4"], (15, 16), "R4 bottom: interface 15 exact overrun"),
+        (figure.add_subplot(grid[2, 1]), by_label["R1"], (18, 19), "R1: interface 18 exact overrun"),
+        (figure.add_subplot(grid[2, 2]), by_label["R2"], (10, 11), "R2 top: interface 10 exact overrun"),
+        (figure.add_subplot(grid[2, 3]), by_label["R4"], (8, 9), "R4 bottom: interface 8 exact overrun"),
     )
     for axes, diagnostic, blocks, title in zooms:
         plot_diagnostic_case(axes, diagnostic, geometry, block_indices=blocks, title=title)
@@ -982,7 +921,7 @@ def plot_supplied_case_diagnostics(diagnostics, geometry):
         by_label["R3"],
         geometry,
         block_indices=(9, 10),
-        title="R3: exact interface 9 pressure point is valid",
+        title="R3: small interface 9 mesh-weight rounding miss",
     )
     plot_fit_summary(figure.add_subplot(grid[3, 2:4]), diagnostics)
     figure.suptitle("Supplied cases: finite-joint pressure validation and nearest admissible fits", y=0.985)
@@ -1013,7 +952,7 @@ def plot_load_panel(axes, rbe_boundary, family, plot_samples, diagnostics, repre
         c=[colormap(sample.boundary_parameter) for sample in plot_samples],
         s=13,
         edgecolors="none",
-        label="joint-admissible contour",
+        label="verified pressure-path boundary",
         zorder=4,
     )
 
@@ -1027,7 +966,7 @@ def plot_load_panel(axes, rbe_boundary, family, plot_samples, diagnostics, repre
         edgecolors=INSIDE_COLOR,
         marker="o",
         s=42,
-        label="nearest admissible fits",
+        label="same loads with fitted insertions",
     )
     for diagnostic in diagnostics:
         axes.plot(
@@ -1058,7 +997,7 @@ def plot_load_panel(axes, rbe_boundary, family, plot_samples, diagnostics, repre
     )
     axes.set_xlabel("left-anchor Fx")
     axes.set_ylabel("left-anchor Fz (arch on anchor)")
-    axes.set_title("RBE region and joint-admissible contour")
+    axes.set_title("RBE and coincident pressure-path boundaries")
     axes.set_aspect("equal", adjustable="box")
     axes.grid(True, alpha=0.25)
     axes.legend(loc="upper center", bbox_to_anchor=(0.5, -0.24), ncol=2, fontsize=8)
@@ -1157,9 +1096,9 @@ def plot_arch_panel(axes, geometry, plot_samples, representative, colormap):
     axes.legend(loc="lower center", fontsize=8)
 
 
-def plot_force_panel(axes, representative, insertion_fraction, color):
+def plot_force_panel(axes, representative, insertion_fraction, color, weights):
     """Plot the force diagram for one retained joint-admissible sample."""
-    diagram = force_diagram(representative.admissible_load, 20)
+    diagram = force_diagram(representative.admissible_load, weights)
     axes.plot(diagram.nodes[:, 0], diagram.nodes[:, 1], color="#A00000", linewidth=1.0)
     for node in diagram.nodes:
         axes.plot(
@@ -1180,11 +1119,12 @@ def plot_force_panel(axes, representative, insertion_fraction, color):
     axes.text(
         0.03,
         0.03,
-        "anchor = ({:.3f}, {:.3f})\ninsertion = {:+.1%}\nweight step = {:.6f}\n{}".format(
+        "anchor = ({:.3f}, {:.3f})\ninsertion = {:+.1%}\nmesh W range = [{:.6f}, {:.6f}]\n{}".format(
             representative.admissible_load[0],
             -representative.admissible_load[1],
             insertion_fraction,
-            BLOCK_WEIGHT,
+            np.min(weights),
+            np.max(weights),
             ", ".join(slope_text),
         ),
         transform=axes.transAxes,
@@ -1215,8 +1155,8 @@ def plot_thrust_family(rbe_boundary, geometry, family, diagnostics, representati
     insertion_fraction = representative.trace.insertion_x - geometry.left_support_x
     plot_load_panel(load_axes, rbe_boundary, family, plot_samples, diagnostics, representative, colormap)
     plot_arch_panel(arch_axes, geometry, plot_samples, representative, colormap)
-    plot_force_panel(force_axes, representative, insertion_fraction, representative_color)
-    figure.suptitle("Example 19-4-1: joint-admissible region and graphic-statics thrust-line family")
+    plot_force_panel(force_axes, representative, insertion_fraction, representative_color, geometry.weights)
+    figure.suptitle("Example 19-4-1: mesh-weight pressure paths on the RBE boundary")
     figure.subplots_adjust(top=0.89, bottom=0.19, left=0.055, right=0.985)
     return figure
 
@@ -1232,7 +1172,13 @@ def report_family(center, family, diagnostics, representative, geometry):
     radial_ratios = np.asarray([sample.admissible_radius / sample.rbe_radius for sample in family], dtype=float)
     widths = np.asarray([sample.interval.upper - sample.interval.lower for sample in family], dtype=float)
     anchor_loads = anchor_plot_coordinates([sample.admissible_load for sample in family])
-    print("graphic-statics block weight: {:.6f}".format(BLOCK_WEIGHT))
+    print(
+        "mesh-derived block weights: range [{:.9g}, {:.9g}], total {:.9g}".format(
+            float(np.min(geometry.weights)),
+            float(np.max(geometry.weights)),
+            float(np.sum(geometry.weights)),
+        )
+    )
     print("joint-admissible center load: Fx={:.9g}, Fz={:.9g}".format(center[0], center[1]))
     print(
         "joint-admissible contour: {} directions, {} plotted lines, radial ratio range [{:.6g}, {:.6g}]".format(
