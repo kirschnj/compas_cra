@@ -15,6 +15,23 @@ Solvers
     cra_solve
     cra_penalty_solve
     rbe_solve
+    rbe_robust_sample
+    rbe_robust_support
+    rbe_robust_support_primal
+    rbe_robust_support_dual
+    rbe_uncertainty_disturb
+    rbe_uncertainty_disturb_sample
+    rbe_uncertainty_disturb_support
+    rbe_uncertainty_disturb_support_primal
+    rbe_uncertainty_disturb_support_dual
+    rbe_uncertainty_geometry
+    rbe_uncertainty_geometry_sample
+    rbe_uncertainty_geometry_support
+    rbe_uncertainty_geometry_support_primal
+    rbe_uncertainty_geometry_support_dual
+    GeometryScenarioProblem
+    plot_rbe_robust_results
+    RobustForceResult
 
 --------------------------
 

@@ -83,6 +83,7 @@ def bounds(
 def objectives(
     solver: Literal["cra", "cra_penalty", "rbe"],
     weights: tuple = (1e0, 1e0, 1e6, 1e0),
+    penalty: bool = True,
 ) -> Callable:
     r"""Objective functions for pyomo.
 
@@ -91,9 +92,13 @@ def objectives(
     solver : str
         * cra: CRA objective, :math:`W_{compression} * ||f_n||_2^2 + W_{\alpha} * ||\alpha||_2^2`
         * cra_penalty: CRA penalty objective, :math:`W_{compression} * ||{f_n}^+||_2^2 + W_{tension} * ||{f_n}^-||_2^2 + W_{\alpha} * ||\alpha||_2^2`
-        * rbe: RBE objective, :math:`W_{compression} * ||{f_n}^+||_2^2 + W_{tension} * ||{f_n}^-||_2^2 + W_{friction} * ||{f_u}||_2^2 + W_{friction} * ||{f_v}||_2^2`
+        * rbe: weighted squared contact forces using either
+          ``[fn, fu, fv]`` or ``[fn+, fn-, fu, fv]``.
     weights : tuple, optional
         weighting factors, :math:`(W_{\alpha}, W_{compression}, W_{tension}, W_{friction})`
+    penalty : bool, optional
+        If ``True``, the RBE force layout is ``[fn+, fn-, fu, fv]``.
+        Otherwise, the layout is ``[fn, fu, fv]``.
 
     Returns
     -------
@@ -109,7 +114,7 @@ def objectives(
 
     def obj_rbe(model):
         """RBE objective function"""
-        return _obj_weights(model)
+        return _obj_weights(model, penalty)
 
     def obj_cra(model):
         """CRA objective function"""
@@ -123,18 +128,20 @@ def objectives(
     def obj_cra_penalty(model):
         """CRA penalty objective function"""
         alpha_sum = pyo.dot_product(model.alpha, model.alpha) * weights[0]  # alpha
-        f_sum = _obj_weights(model)
+        f_sum = _obj_weights(model, True)
         return alpha_sum + f_sum
 
-    def _obj_weights(model):
+    def _obj_weights(model, use_penalty):
         f_sum = 0
         for i in model.f_id:
-            if i % 4 == 1:
-                f_sum = f_sum + (model.f[i] * model.f[i] * weights[2])  # tension
-            elif i % 4 == 0:
-                f_sum = f_sum + (model.f[i] * model.f[i] * weights[1])  # compression
-            elif i % 4 == 2 or i % 3 == 0:
-                f_sum = f_sum + (model.f[i] * model.f[i] * weights[3])  # friction
+            component = i % (4 if use_penalty else 3)
+            if component == 0:
+                weight = weights[1]  # compression
+            elif use_penalty and component == 1:
+                weight = weights[2]  # tension
+            else:
+                weight = weights[3]  # friction
+            f_sum = f_sum + (model.f[i] * model.f[i] * weight)
         return f_sum
 
     if solver == "cra":

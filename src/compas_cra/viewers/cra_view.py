@@ -1,5 +1,9 @@
 """CRA view style using compas_view2"""
 
+import os
+import sys
+import types
+from itertools import tee
 from math import sqrt
 
 import numpy as np
@@ -13,15 +17,216 @@ from compas.geometry import Rotation
 from compas.geometry import Translation
 from compas.geometry import is_coplanar
 
-try:
-    from compas_view2 import app
-    from compas_view2.collections import Collection
-    from compas_view2.shapes import Arrow
-except ImportError:
+app = None
+Collection = None
+Arrow = None
+
+
+class _CompasView2RobotModel:
     pass
 
 
+class _CompasView2Geometry:
+    @staticmethod
+    def _get_item_meshes(item):
+        raise NotImplementedError("Robot visualization is not supported by the CRA compas_view2 compatibility shim.")
+
+
+def _flatten(items):
+    for item in items:
+        yield from item
+
+
+def _pairwise(iterable):
+    a, b = tee(iterable)
+    next(b, None)
+    return list(zip(a, b))
+
+
+def _gif_from_images(files, gif_path, fps=10, delete_files=False):
+    try:
+        import imageio.v2 as imageio
+    except ImportError as e:
+        raise ImportError(
+            "Recording GIFs with compas_view2 requires imageio. Install it in the active environment."
+        ) from e
+
+    images = [imageio.imread(filename) for filename in files]
+    duration = 1.0 / fps if fps else 0.1
+    imageio.mimsave(gif_path, images, duration=duration)
+
+    if delete_files:
+        for filename in files:
+            try:
+                os.remove(filename)
+            except OSError:
+                pass
+
+
+def _install_compas_view2_compatibility():
+    """Install small COMPAS 1 compatibility shims required by compas_view2 0.11."""
+    import compas.utilities as utilities
+
+    if not hasattr(utilities, "flatten"):
+        utilities.flatten = _flatten
+    if not hasattr(utilities, "pairwise"):
+        utilities.pairwise = _pairwise
+    if not hasattr(utilities, "gif_from_images"):
+        utilities.gif_from_images = _gif_from_images
+
+    if "compas.robots" not in sys.modules:
+        robots = types.ModuleType("compas.robots")
+        robots.RobotModel = _CompasView2RobotModel
+        robots.Geometry = _CompasView2Geometry
+        sys.modules["compas.robots"] = robots
+
+
+def _preload_qtpy():
+    """Load QtPy before compas_view2 forces PySide2 in its package init."""
+    if "qtpy" in sys.modules:
+        return
+
+    os.environ.setdefault("QT_API", "pyqt5")
+    try:
+        import qtpy  # noqa: F401
+    except ImportError as e:
+        raise ImportError(
+            "The compas_view2 viewer requires qtpy and a Qt binding. Install PyQt5 and qtpy in the active environment."
+        ) from e
+
+
+def _patch_compas_view2_app(view2_app):
+    if getattr(view2_app.App, "_compas_cra_resize_patch", False):
+        return
+
+    def resize(self, width, height):
+        width = int(width)
+        height = int(height)
+        self.window.resize(width, height)
+        desktop = self._app.desktop()
+        rect = desktop.availableGeometry()
+        x = int(0.5 * (rect.width() - width))
+        y = int(0.5 * (rect.height() - height))
+        self.window.setGeometry(x, y, width, height)
+
+    view2_app.App.resize = resize
+    view2_app.App._compas_cra_resize_patch = True
+
+
+def _patch_compas_view2_controller(view2_app):
+    controller = view2_app.Controller
+    if getattr(controller, "_compas_cra_wheel_patch", False):
+        return
+
+    def wheel_action(self, event):
+        if hasattr(event, "angleDelta"):
+            steps = event.angleDelta().y() / 120
+        else:
+            steps = event.delta() / 120
+
+        self.app.view.camera.zoom(steps)
+        self.app.view.update()
+
+    controller.wheel_action = wheel_action
+    controller._compas_cra_wheel_patch = True
+
+
+def _patch_compas_view2_arrow(view2_arrow):
+    if getattr(view2_arrow, "_compas_cra_arrow_patch", False):
+        return
+
+    def to_vertices_and_faces(self, u=4):
+        if u < 3:
+            raise ValueError("The value for u should be u > 3.")
+
+        from compas.datastructures import Mesh
+        from compas.geometry import Cone
+        from compas.geometry import Cylinder
+        from compas.geometry import Frame
+        from compas.geometry import Plane
+
+        head_position = self.position + self.direction * (1 - self.head_portion)
+        head_frame = Frame.from_plane(Plane(head_position, self.direction))
+        head = Cone(
+            self.head_width * self.direction.length,
+            self.direction.length * self.head_portion,
+            frame=head_frame,
+        )
+        vertices, faces = head.to_vertices_and_faces(u=u)
+        head_mesh = Mesh.from_vertices_and_faces(vertices, faces)
+
+        body_center = self.position + self.direction * (1 - self.head_portion) / 2
+        body_frame = Frame.from_plane(Plane(body_center, self.direction))
+        body = Cylinder(
+            self.body_width * self.direction.length,
+            self.direction.length * (1 - self.head_portion),
+            frame=body_frame,
+        )
+        vertices, faces = body.to_vertices_and_faces(u=u)
+        body_mesh = Mesh.from_vertices_and_faces(vertices, faces)
+
+        body_mesh.join(head_mesh)
+        return body_mesh.to_vertices_and_faces()
+
+    view2_arrow.to_vertices_and_faces = to_vertices_and_faces
+    view2_arrow._compas_cra_arrow_patch = True
+
+
+def _load_compas_view2():
+    """Load compas_view2 with compatibility for the current COMPAS 2 environment."""
+    global app
+    global Collection
+    global Arrow
+
+    if app is not None and Collection is not None and Arrow is not None:
+        return app, Collection, Arrow
+
+    _preload_qtpy()
+    _install_compas_view2_compatibility()
+
+    import builtins
+
+    robot_model_in_builtins = hasattr(builtins, "RobotModel")
+    if not robot_model_in_builtins:
+        builtins.RobotModel = _CompasView2RobotModel
+
+    try:
+        from compas_view2 import app as view2_app
+        from compas_view2.collections import Collection as view2_collection
+        from compas_view2.shapes import Arrow as view2_arrow
+    except ModuleNotFoundError as e:
+        if e.name == "freetype":
+            raise ImportError(
+                "The compas_view2 viewer imports freetype at startup. "
+                "Install freetype-py in the active environment, for example: "
+                "python -m pip install freetype-py"
+            ) from e
+        raise ImportError(
+            "Could not import compas_view2. Install compas_view2 and its viewer runtime dependencies "
+            "in the active environment."
+        ) from e
+    except ImportError as e:
+        raise ImportError(
+            "Could not import compas_view2 with the COMPAS 2 compatibility shims. "
+            "Check that compas_view2, qtpy, PyQt5, PyOpenGL, matplotlib, and freetype-py are installed."
+        ) from e
+    finally:
+        if not robot_model_in_builtins:
+            del builtins.RobotModel
+
+    _patch_compas_view2_app(view2_app)
+    _patch_compas_view2_controller(view2_app)
+    _patch_compas_view2_arrow(view2_arrow)
+
+    app = view2_app
+    Collection = view2_collection
+    Arrow = view2_arrow
+    return app, Collection, Arrow
+
+
 def draw_blocks(assembly, viewer, edge=True, tol=0.0):
+    _load_compas_view2()
+
     supports = []
     blocks = []
     supportedges = []
@@ -72,6 +277,8 @@ def draw_blocks(assembly, viewer, edge=True, tol=0.0):
 
 
 def draw_interfaces(assembly, viewer):
+    _load_compas_view2()
+
     interfaces = []
     faces = []
     for edge in assembly.graph.edges():
@@ -112,6 +319,8 @@ def draw_interfaces(assembly, viewer):
 
 
 def draw_forces(assembly, viewer, scale=1.0, resultant=True, nodal=False):
+    _load_compas_view2()
+
     locs = []
     res_np = []
     res_nn = []
@@ -177,6 +386,8 @@ def draw_forces(assembly, viewer, scale=1.0, resultant=True, nodal=False):
 
 
 def draw_forcesline(assembly, viewer, scale=1.0, resultant=True, nodal=False):
+    _load_compas_view2()
+
     locs = []
     res_np = []
     res_nn = []
@@ -256,6 +467,8 @@ def draw_forcesline(assembly, viewer, scale=1.0, resultant=True, nodal=False):
 
 
 def draw_forcesdirect(assembly, viewer, scale=1.0, resultant=True, nodal=False):
+    _load_compas_view2()
+
     locs = []
     res_np = []
     res_nn = []
@@ -394,6 +607,8 @@ def draw_forcesdirect(assembly, viewer, scale=1.0, resultant=True, nodal=False):
 
 
 def draw_displacements(assembly, viewer, dispscale=1.0, tol=0.0):
+    _load_compas_view2()
+
     blocks = []
     nodes = []
     for node in assembly.graph.nodes():
@@ -431,6 +646,8 @@ def draw_displacements(assembly, viewer, dispscale=1.0, tol=0.0):
 
 
 def draw_weights(assembly, viewer, scale=1.0, density=1.0):
+    _load_compas_view2()
+
     weights = []
     blocks = []
     supports = []
@@ -524,6 +741,7 @@ def cra_view(
     None
     """
 
+    _load_compas_view2()
     viewer = app.App(width=1600, height=1000, viewmode="shaded", show_grid=grid)
 
     if blocks:

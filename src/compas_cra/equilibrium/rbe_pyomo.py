@@ -24,7 +24,8 @@ def rbe_solve(
     verbose: bool = False,
     timer: bool = False,
     penalty: bool =  True,
-    solver_options: dict = None
+    solver_options: dict = None,
+    external_forces: dict | None = None,
 ) -> Assembly:
     r"""RBE solver with penalty formulation using Pyomo + IPOPT.
 
@@ -66,6 +67,7 @@ def rbe_solve(
     `Coupled Rigid-Block Analysis: Stability-Aware Design of Complex Discrete-Element Assemblies <https://doi.org/10.1016/j.cad.2022.103216>`_
 
     """
+    external_forces = {} if external_forces is None else external_forces
 
     model = pyo.ConcreteModel()
 
@@ -75,17 +77,23 @@ def rbe_solve(
     if solver_options is None:
         solver_options = {}
 
-    v_num = num_vertices(assembly)  # number of vertices
+    v_num = num_vertices(assembly)  # number of vertices (including fix and free)
 
-    model.f_id = pyo.Set(initialize=range(v_num * 4))  # force indices
-    model.f = pyo.Var(model.f_id, initialize=0, domain=bounds("f_tilde"))
+    #Unknown
+    if penalty == True:
+        model.f_id = pyo.Set(initialize=range(v_num * 4))  # [fn+, fn-, fu, fv] force indices # 4 2 directional friction force and positive tension and negative compression
+        model.f = pyo.Var(model.f_id, initialize=0, domain=bounds("f_tilde")) # bounds function => [fn+, fn-] Non-negative Real, [fu, fv] Real 
+    else:
+        model.f_id = pyo.Set(initialize=range(v_num * 3))  # [fn, fu, fv] force indices # 3 2 directional friction force and positive tension and negative compression
+        model.f = pyo.Var(model.f_id, initialize=0, domain=bounds("f")) # bounds function => [fn] Non-negative Real, [fu, fv] Real 
     model.array_f = np.array([model.f[i] for i in model.f_id])
 
-    aeq_b = equilibrium_setup(assembly, penalty=penalty, verbose=verbose)
-    afr_b = friction_setup(assembly, mu, penalty=penalty, verbose=verbose)
-    p = external_force_setup(assembly, density)
+    #Known
+    aeq_b = equilibrium_setup(assembly, penalty=penalty, verbose=verbose) #all known
+    afr_b = friction_setup(assembly, mu, penalty=penalty, verbose=verbose) #all known
+    p = external_force_setup(assembly, density, external_forces) #all known
 
-    obj_rbe = objectives("rbe", (0, 1e0, 1e6, 1e0))
+    obj_rbe = objectives("rbe", (0, 1e0, 1e6, 1e0), penalty=penalty)  # minimize the sum of everything
     eq_con, fr_con = static_equilibrium_constraints(model, aeq_b, afr_b, p)
 
     model.obj = pyo.Objective(rule=obj_rbe, sense=pyo.minimize)
@@ -99,7 +107,9 @@ def rbe_solve(
     if timer:
         start_time = time.time()
 
-    solver = pyo.SolverFactory("ipopt")
+    #solver = pyo.SolverFactory("ipopt")
+    solver = pyo.SolverFactory('gurobi')
+    #solver = pyo.SolverFactory("ipopt", executable="C:/Users/jingwang/.conda/envs/robtod2_test/Library/bin/ipopt.exe")
     solver.options.update(solver_options)
     result = solver.solve(model, tee=verbose)
 

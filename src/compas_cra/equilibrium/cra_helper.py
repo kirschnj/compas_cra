@@ -23,9 +23,9 @@ def equilibrium_setup(assembly, penalty=False, verbose=False):
         Equilibrium matrix Aeq (penalty=False) or Equilibrium penalty matrix Aeq@B (penalty=True).
 
     """
-    free = free_nodes(assembly)
-    aeq = make_aeq(assembly, penalty=penalty)
-    aeq = aeq[[index * 6 + i for index in free for i in range(6)], :]
+    free = free_nodes(assembly)  # free block id
+    aeq = make_aeq(assembly, penalty=penalty)  # refer to Appendix Aeq -> pure geometry information
+    aeq = aeq[[index * 6 + i for index in free for i in range(6)], :]  # remove fixed block from equilibrum
     if verbose:
         print("Aeq: ", aeq.shape)
 
@@ -60,7 +60,7 @@ def friction_setup(assembly, mu, penalty=False, friction_net=False, verbose=Fals
     return afr
 
 
-def external_force_setup(assembly, density, verbose=False):
+def external_force_setup(assembly, density, external_forces: dict | None = None, verbose=False):
     """Set up external force vector.
 
     Parameters
@@ -70,13 +70,15 @@ def external_force_setup(assembly, density, verbose=False):
     density : float
         Density of the material.
         If density attribute is not set, optimisation will use this density value.
-
+    external_forces: dict
+        External forces applied to the node
     Returns
     -------
     :class:`~numpy.ndarray`
         External force p.
 
     """
+    external_forces = {} if external_forces is None else external_forces
     free = free_nodes(assembly)
 
     num_nodes = assembly.graph.number_of_nodes()
@@ -87,8 +89,14 @@ def external_force_setup(assembly, density, verbose=False):
         block = assembly.node_block(node)
         index = key_index[node]
         p[index][2] = -block.volume() * (block.attributes["density"] if "density" in block.attributes else density)
-        if verbose:
-            print((block.attributes["density"] if "density" in block.attributes else density))
+        # if verbose:
+        #     print((block.attributes["density"] if "density" in block.attributes else density))
+        if node in external_forces:
+            if verbose:
+                print(f"adding external forces to node {node}")
+            for i in range(6):
+                p[index][i] = p[index][i] + external_forces[node][i]
+            print(f"new forces is p{p[index]}")
 
     p = np.array(p, dtype=float)
     p = p[free, :].reshape((-1, 1), order="C")
@@ -210,21 +218,22 @@ def make_aeq(assembly, flip=False, penalty=False):
     key_index = {key: index for index, key in enumerate(assembly.graph.nodes())}
 
     for b_j, b_k in assembly.graph.edges(False):
-        bj_center = assembly.graph.node_attribute(b_j, "block").center()
-        bk_center = assembly.graph.node_attribute(b_k, "block").center()
+        bj_center = assembly.graph.node_attribute(b_j, "block").center()  # interface bj's center node
+        bk_center = assembly.graph.node_attribute(b_k, "block").center()  # interface bk's center node
 
         for interface in assembly.graph.edge_attribute((b_j, b_k), "interfaces"):
             # B_j
+            # Assemble every interface matrix size (Row -6) Col (Point*3/4).
             block_rows, block_cols, block_data = aeq_block(interface, bj_center, not flip, penalty)
             # shift rows and cols
-            rows += [row + 6 * key_index[b_j] for row in block_rows]
-            cols += [col + shift * count for col in block_cols]
+            rows += [row + 6 * key_index[b_j] for row in block_rows]  # rows globally is per block 6 rows
+            cols += [col + shift * count for col in block_cols]  # columns are based on the assembly point
             data += block_data
             # B_k
             block_rows, block_cols, block_data = aeq_block(interface, bk_center, flip, penalty)
             # shift rows and cols
-            rows += [row + 6 * key_index[b_k] for row in block_rows]
-            cols += [col + shift * count for col in block_cols]
+            rows += [row + 6 * key_index[b_k] for row in block_rows]  # rows globally is per block 6 rows
+            cols += [col + shift * count for col in block_cols]  # columns are based on the assembly point
             data += block_data
             count += len(interface.points)
 
@@ -265,13 +274,13 @@ def aeq_block(interface, center, reverse, penalty=False):
         v = [-1.0 * axis for axis in v]
         w = [-1.0 * axis for axis in w]
 
-    fx = [w[0], -w[0], u[0], v[0]] if penalty else [w[0], u[0], v[0]]
+    fx = [w[0], -w[0], u[0], v[0]] if penalty else [w[0], u[0], v[0]]  # Perpendicular to the interface
     fy = [w[1], -w[1], u[1], v[1]] if penalty else [w[1], u[1], v[1]]
     fz = [w[2], -w[2], u[2], v[2]] if penalty else [w[2], u[2], v[2]]
 
     for i, xyz in enumerate(interface.points):
         # coordinates of interface point relative to block mass center
-        rxyz = [xyz[axis] - center[axis] for axis in range(3)]
+        rxyz = [xyz[axis] - center[axis] for axis in range(3)]  # vector from point to interface center
         # moments
         mu = cross_vectors(rxyz, u)
         mv = cross_vectors(rxyz, v)

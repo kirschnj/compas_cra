@@ -7,9 +7,9 @@ from compas_cra.algorithms import assembly_interfaces_numpy
 from compas_cra.equilibrium import rbe_solve
 
 
-def test_cra_penalty():
+def test_rbe_penalty():
     support = Box(1, 1, 1)  # supporting block
-    free1 = Box(1, 1, 1, frame=Frame.worldXY().transformed(Translation.from_vector([0.75, 0, 1])))  # block to analyse
+    free1 = Box(1, 1, 1, frame=Frame.worldXY().transformed(Translation.from_vector([0.5, 0, 1])))  # block to analyse
 
     assembly = CRA_Assembly()
     assembly.add_block(Block.from_shape(support), node=0)
@@ -18,7 +18,7 @@ def test_cra_penalty():
 
     assembly_interfaces_numpy(assembly, amin=1e-6, tmax=1e-4)
 
-    rbe_solve(assembly, density=1)
+    rbe_solve(assembly, density=1, penalty=False, verbose=True)
 
     block = assembly.graph.node_attribute(1, "block")
     weight = block.volume()
@@ -27,8 +27,13 @@ def test_cra_penalty():
         for interface in assembly.graph.edge_attribute(edge, "interfaces"):
             corners = interface.points
             forces = interface.forces
+            print(forces)
             for i, corner in enumerate(corners):
                 force = forces[i]["c_np"] - forces[i]["c_nn"]
                 resultant += force
-
+    print("weight", weight)
+    print("resultant", resultant)
     assert round(weight, 2) == round(resultant, 2)
+
+if __name__ == "__main__":
+    test_rbe_penalty()
